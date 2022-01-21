@@ -58,6 +58,14 @@ case object DecimalBatchSizes extends BatchSizes {
   def batches: List[Int] = List(100, 1000, 10000, 100000)
 }
 
+case object SmallBinaryBatchSizes extends BatchSizes {
+  def batches: List[Int] = List(1024, 100000)
+}
+
+case object SmallDecimalBatchSizes extends BatchSizes {
+  def batches: List[Int] = List(1000, 100000)
+}
+
 trait TestRunnerUtils {
   def reWriteBatchedInserts: Boolean
   def setupDB(): Unit = {
@@ -81,30 +89,32 @@ trait TestRunnerUtils {
   setupDB()
 
   def prepareTest(rows: Int): Unit = {
-    DB localTx {implicit session =>
+    DB localTx { implicit session =>
       sql"create table if not exists test (a varchar(180) not null, b varchar(180) not null, constraint test_pk primary key (a, b))".update.apply()
-      SQL(s"""create or replace function insert_test(data bytea) returns int as $$$$
-          |    offset = 0
-          |    length = len(data)
-          |    result = []
-          |    while offset < length:
-          |        a = data[offset: offset + 36].decode("utf-8")
-          |        offset = offset + 36
-          |        b = data[offset: offset + 36].decode("utf-8")
-          |        offset = offset + 36
-          |        result.append((a,b))
-          |    if "insert_test" in SD:
-          |        plan = SD["insert_test"]
-          |    else:
-          |        plan = plpy.prepare(\"\"\"
-          |        insert into test
-          |          (select inserts.a, inserts.b from unnest($$1) inserts)
-          |        \"\"\",
-          |        ["test[]"])
-          |        SD["insert_test"] = plan
-          |    changed = plan.execute([result])
-          |    return changed.nrows()
-          |$$$$ language plpython3u""".stripMargin).update.apply()
+      SQL(
+        s"""create or replace function insert_test(data bytea) returns int as $$$$
+           |    offset = 0
+           |    length = len(data)
+           |    result = []
+           |    while offset < length:
+           |        a = data[offset: offset + 36].decode("utf-8")
+           |        offset = offset + 36
+           |        b = data[offset: offset + 36].decode("utf-8")
+           |        offset = offset + 36
+           |        result.append((a,b))
+           |    if "insert_test" in SD:
+           |        plan = SD["insert_test"]
+           |    else:
+           |        plan = plpy.prepare(\"\"\"
+           |        insert into test
+           |          (select inserts.a, inserts.b from unnest($$1) inserts)
+           |        \"\"\",
+           |        ["test[]"])
+           |        SD["insert_test"] = plan
+           |    changed = plan.execute([result])
+           |    return changed.nrows()
+           |$$$$ language plpython3u""".stripMargin
+      ).update.apply()
     }
     BindTwoArrays.test(GetData.ofSize(rows), rows)
   }
@@ -115,10 +125,14 @@ trait TestRunnerUtils {
     for {
       batchSize <- batchSizes.batches
     } yield {
-      val average = (for {
+      val elapsed = (for {
         i <- 1 to times
-      } yield test.runTest(batchSize, keepRows)).sum / times
-      println(s"Batch size $batchSize average time is $average ms in $times runs")
+      } yield test.runTest(batchSize, keepRows)).toList
+      val mean = elapsed.sum / times
+      val min = elapsed.min
+      val max = elapsed.max
+      val meanDelta = elapsed.map(value => Math.abs(value - mean)).sum / times
+      println(s"Batch size $batchSize average time is $mean ms in $times runs [min $min, max $max, delta $meanDelta]")
     }
   }
 }
