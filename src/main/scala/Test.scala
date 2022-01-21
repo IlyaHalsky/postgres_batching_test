@@ -1,3 +1,4 @@
+import DBConfig.{password, url, user}
 import com.zaxxer.hikari.HikariDataSource
 import scalikejdbc._
 
@@ -16,12 +17,21 @@ object Time {
   }
 }
 
+/*
+create table test
+(
+    a varchar(180) not null,
+    b varchar(180) not null,
+    constraint test_pk
+        primary key (a, b)
+);
+ */
 object Test extends App {
   val dataSource: HikariDataSource = {
     val ds = new HikariDataSource()
-    ds.setJdbcUrl("jdbc:postgresql://host:port/db?reWriteBatchedInserts=true")
-    ds.setUsername("user")
-    ds.setPassword("password")
+    ds.setJdbcUrl(s"jdbc:postgresql://$url?reWriteBatchedInserts=true")
+    ds.setUsername(user)
+    ds.setPassword(password)
     ds.setMaxLifetime(900000)
     ds.setMaximumPoolSize(5)
     ds
@@ -56,5 +66,16 @@ object Test extends App {
     }).foreach { case (av, bs) => println(s"Batch size $bs average time is $av ms") }
   }
 
-  arrayTest
+  def byteArrayTest = {
+    (for {
+      batchSize <- List(100, 1000, 10000, 100000)
+    } yield {
+      val average = (for {
+        i <- 1 to 10
+      } yield ByteArrayTest(batchSize)).sum / 10
+      average -> batchSize
+    }).foreach { case (av, bs) => println(s"Batch size $bs average time is $av ms") }
+  }
+
+  byteArrayTest
 }
